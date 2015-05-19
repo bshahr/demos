@@ -41,14 +41,19 @@ local opt = lapp[[
    --coefL1           (default 0)           L1 penalty on the weights
    --coefL2           (default 0)           L2 penalty on the weights
    -t,--threads       (default 4)           number of threads
+   -v,--verbose                             print out progress statements or not
+   --epochs           (default 10000)       number of epochs to train for
+   --seed             (default 1)           random seed
 ]]
 
 -- fix seed
-torch.manualSeed(1)
+torch.manualSeed(opt.seed)
 
 -- threads
 torch.setnumthreads(opt.threads)
-print('<torch> set nb of threads to ' .. torch.getnumthreads())
+if opt.verbose then
+    print('<torch> set nb of threads to ' .. torch.getnumthreads())
+end
 
 -- use floats, for SGD
 if opt.optimization == 'SGD' then
@@ -116,7 +121,9 @@ if opt.network == '' then
       error()
    end
 else
-   print('<trainer> reloading previously trained network')
+   if opt.verbose then
+      print('<trainer> reloading previously trained network')
+   end
    model = torch.load(opt.network)
 end
 
@@ -124,8 +131,10 @@ end
 parameters,gradParameters = model:getParameters()
 
 -- verbose
-print('<mnist> using model:')
-print(model)
+if opt.verbose then
+   print('<mnist> using model:')
+   print(model)
+end
 
 ----------------------------------------------------------------------
 -- loss function: negative log-likelihood
@@ -142,7 +151,9 @@ if opt.full then
 else
    nbTrainingPatches = 2000
    nbTestingPatches = 1000
-   print('<warning> only using 2000 samples to train quickly (use flag -full to use 60000 samples)')
+   if opt.verbose then
+      print('<warning> only using 2000 samples to train quickly (use flag -full to use 60000 samples)')
+   end
 end
 
 -- create training set and normalize
@@ -173,8 +184,10 @@ function train(dataset)
    local time = sys.clock()
 
    -- do one epoch
-   print('<trainer> on training set:')
-   print("<trainer> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
+   if opt.verbose then
+      print('<trainer> on training set:')
+      print("<trainer> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
+   end
    for t = 1,dataset:size(),opt.batchSize do
       -- create mini batch
       local inputs = torch.Tensor(opt.batchSize,1,geometry[1],geometry[2])
@@ -245,10 +258,12 @@ function train(dataset)
          optim.lbfgs(feval, parameters, lbfgsState)
        
          -- disp report:
-         print('LBFGS step')
-         print(' - progress in batch: ' .. t .. '/' .. dataset:size())
-         print(' - nb of iterations: ' .. lbfgsState.nIter)
-         print(' - nb of function evalutions: ' .. lbfgsState.funcEval)
+         if opt.verbose then
+            print('LBFGS step')
+            print(' - progress in batch: ' .. t .. '/' .. dataset:size())
+            print(' - nb of iterations: ' .. lbfgsState.nIter)
+            print(' - nb of function evalutions: ' .. lbfgsState.funcEval)
+         end
 
       elseif opt.optimization == 'SGD' then
 
@@ -261,7 +276,9 @@ function train(dataset)
          optim.sgd(feval, parameters, sgdState)
       
          -- disp progress
-         xlua.progress(t, dataset:size())
+         if opt.verbose then
+            xlua.progress(t, dataset:size())
+         end
 
       else
          error('unknown optimization method')
@@ -271,10 +288,14 @@ function train(dataset)
    -- time taken
    time = sys.clock() - time
    time = time / dataset:size()
-   print("<trainer> time to learn 1 sample = " .. (time*1000) .. 'ms')
+   if opt.verbose then
+      print("<trainer> time to learn 1 sample = " .. (time*1000) .. 'ms')
+   end
 
    -- print confusion matrix
-   print(confusion)
+   if opt.verbose then
+      print(confusion)
+   end
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
    confusion:zero()
 
@@ -284,7 +305,9 @@ function train(dataset)
    if paths.filep(filename) then
       os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
    end
-   print('<trainer> saving network to '..filename)
+   if opt.verbose then
+      print('<trainer> saving network to '..filename)
+   end
    -- torch.save(filename, model)
 
    -- next epoch
@@ -297,10 +320,14 @@ function test(dataset)
    local time = sys.clock()
 
    -- test over given dataset
-   print('<trainer> on testing Set:')
+   if opt.verbose then
+      print('<trainer> on testing Set:')
+   end
    for t = 1,dataset:size(),opt.batchSize do
       -- disp progress
-      xlua.progress(t, dataset:size())
+      if opt.verbose then
+         xlua.progress(t, dataset:size())
+      end
 
       -- create mini batch
       local inputs = torch.Tensor(opt.batchSize,1,geometry[1],geometry[2])
@@ -329,21 +356,30 @@ function test(dataset)
    -- timing
    time = sys.clock() - time
    time = time / dataset:size()
-   print("<trainer> time to test 1 sample = " .. (time*1000) .. 'ms')
+   if opt.verbose then
+      print("<trainer> time to test 1 sample = " .. (time*1000) .. 'ms')
+   end
 
    -- print confusion matrix
-   print(confusion)
-   testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   if opt.verbose then
+      print(confusion)
+   else
+      confusion:updateValids()
+   end
+   accuracy = confusion.totalValid * 100
+   testLogger:add{['% mean class accuracy (test set)'] = accuracy}
    confusion:zero()
+
+   return accuracy
 end
 
 ----------------------------------------------------------------------
 -- and train!
 --
-while true do
+for i = 1, opt.epochs do
    -- train/test
    train(trainData)
-   test(testData)
+   acc = test(testData)
 
    -- plot errors
    if opt.plot then
@@ -353,3 +389,7 @@ while true do
       testLogger:plot()
    end
 end
+
+print('<output> = ' .. acc)
+
+
