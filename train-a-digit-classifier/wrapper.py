@@ -37,7 +37,7 @@ out = subprocess.check_output([
 )
 
 # -- parse output from stdout
-out = out.splitlines()                              # keep last line
-out = re.compile(r'\x1b[^m]*m').sub('', out[-1])    # strip color codes
+out = out.splitlines()[-1]                          # keep last line
+out = re.compile(r'\x1b[^m]*m').sub('', out)        # strip color codes
 out = out.split('=')[-1]                            # strip left hand side
 out = float(out)
