@@ -454,10 +454,10 @@ for i = 1, opt.epochs do
    errLogger:add{['% train error']    = trainErr, ['% test error']    = testErr}
 
    -- plot logger
-   accLogger:style{['% train accuracy'] = '-', ['% test accuracy'] = '-'}
-   errLogger:style{['% train error']    = '-', ['% test error']    = '-'}
-   accLogger:plot()
-   errLogger:plot()
+   -- accLogger:style{['% train accuracy'] = '-', ['% test accuracy'] = '-'}
+   -- errLogger:style{['% train error']    = '-', ['% test error']    = '-'}
+   -- accLogger:plot()
+   -- errLogger:plot()
 end
 
 print('<output> = ' .. testAcc)
