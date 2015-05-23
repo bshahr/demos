@@ -17,7 +17,7 @@
 
 require 'torch'
 require 'nn'
-require 'nnx'
+-- require 'nnx'
 require 'optim'
 require 'image'
 require 'dataset-mnist'
@@ -42,7 +42,7 @@ local opt = lapp[[
    --coefL2           (default 0)           L2 penalty on the weights
    -t,--threads       (default 4)           number of threads
    -v,--verbose                             print out progress statements or not
-   --epochs           (default 10000)       number of epochs to train for
+   --epochs           (default 10)          number of epochs to train for
    --seed             (default 1)           random seed
 ]]
 
