@@ -36,12 +36,13 @@ cmd:option('-visualize', false, 'visualize input data and weights during trainin
 cmd:option('-seed', 1, 'fixed input seed for repeatable experiments')
 cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
 cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
-cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
+cmd:option('-batchSize', 100, 'mini-batch size (1 = pure stochastic)')
 cmd:option('-weightDecay', 0, 'weight decay (SGD only)')
 cmd:option('-momentum', 0, 'momentum (SGD only)')
 cmd:option('-t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
 cmd:option('-maxIter', 5, 'maximum nb of iterations for CG and LBFGS')
 cmd:option('-threads', 2, 'nb of threads to use')
+cmd:option('-epochs', 10, 'number of epochs to train for')
 cmd:text()
 opt = cmd:parse(arg)
 
@@ -131,8 +132,8 @@ if opt.full then
    trsize = 50000
    tesize = 10000
 else
-   trsize = 2000
-   tesize = 1000
+   trsize = 10000
+   tesize = 2000
 end
 
 -- download dataset
@@ -443,7 +444,7 @@ end
 ----------------------------------------------------------------------
 -- and train!
 --
-while true do
+for i = 1, opt.epochs do
    -- train/test
    trainAcc, trainErr = train(trainData)
    testAcc,  testErr  = test (testData)
@@ -458,3 +459,7 @@ while true do
    accLogger:plot()
    errLogger:plot()
 end
+
+print('<output> = ' .. testAcc)
+
+
