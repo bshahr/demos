@@ -73,9 +73,13 @@ local optimState = {
 
 ----------------------------------------------------------------------
 print(sys.COLORS.red ..  '==> allocating minibatch memory')
-local x = torch.Tensor(opt.batchSize,trainData.data:size(2), 
-         trainData.data:size(3), trainData.data:size(4)) --faces data
+local x = torch.Tensor(
+   opt.batchSize,
+   trainData.data:size(2), 
+   trainData.data:size(3),
+   trainData.data:size(4)) --faces data
 local yt = torch.Tensor(opt.batchSize)
+
 if opt.type == 'cuda' then 
    x = x:cuda()
    yt = yt:cuda()

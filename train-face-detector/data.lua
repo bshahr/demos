@@ -13,10 +13,10 @@
 
 require 'torch'   -- torch
 require 'image'   -- to visualize the dataset
-require 'nnx'      -- provides a normalization operator
+require 'nnx'     -- provides a normalization operator
 
 local opt = opt or {
-   visualize = true,
+   visualize = false,
    size = 'small',
    patches='all'
 }
@@ -209,12 +209,12 @@ for i,channel in ipairs(channels) do
 end
 
 ----------------------------------------------------------------------
-print(sys.COLORS.red ..  '==> visualizing data')
-
 -- Visualization is quite easy, using image.display(). Check out:
 -- help(image.display), for more info about options.
 
-if opt.visualize then
+if opt.visualize == true then
+    print(sys.COLORS.red ..  '==> visualizing data')
+
    local first256Samples_y = trainData.data[{ {1,256},1 }]
    image.display{image=first256Samples_y, nrow=16, legend='Some training examples: Y channel'}
    local first256Samples_y = testData.data[{ {1,256},1 }]

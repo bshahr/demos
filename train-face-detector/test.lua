@@ -77,12 +77,15 @@ function test(testData)
    print(confusion)
 
    -- update log/plot
-   testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   testAcc = confusion.totalValid * 100
+   testLogger:add{['% mean class accuracy (test set)'] = testAcc}
    if opt.plot then
       testLogger:style{['% mean class accuracy (test set)'] = '-'}
       testLogger:plot()
    end
    confusion:zero()
+
+   return testAcc
    
 end
 

@@ -28,7 +28,8 @@ opt = lapp[[
    -s,--size               (default small)       dataset: small or full or extra
    -o,--save               (default results)     save directory
       --patches            (default all)         percentage of samples to use for testing'
-      --visualize          (default true)        visualize dataset
+      --visualize          (default false)       visualize dataset
+      --epochs             (default 10)          number of epochs to train for
 ]]
 
 -- nb of threads and fixed seed (for repeatable experiments)
@@ -54,8 +55,9 @@ local test  = require 'test'
 ----------------------------------------------------------------------
 print(sys.COLORS.red .. '==> training!')
 
-while true do
+for i = 1, opt.epochs do
    train(data.trainData)
-   test(data.testData)
+   testAcc = test(data.testData)
 end
 
+print('<output> = ' .. testAcc)
