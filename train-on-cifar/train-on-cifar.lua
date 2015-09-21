@@ -42,6 +42,8 @@ cmd:option('--momentum', 0, 'momentum (SGD only)')
 cmd:option('--t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
 cmd:option('--maxIter', 5, 'maximum nb of iterations for CG and LBFGS')
 cmd:option('--threads', 2, 'nb of threads to use')
+cmd:option('--type', 'float', 'float or cuda')
+cmd:option('--devid', 1, 'device ID (if using CUDA)')
 cmd:option('--epochs', 10, 'number of epochs to train for')
 cmd:text()
 opt = cmd:parse(arg)
@@ -52,6 +54,17 @@ torch.manualSeed(opt.seed)
 -- threads
 torch.setnumthreads(opt.threads)
 print('<torch> set nb of threads to ' .. opt.threads)
+
+-- type:
+if opt.type == 'cuda' then
+   print(sys.COLORS.red ..  '==> switching to CUDA')
+   require 'cunn'
+   cutorch.setDevice(opt.devid)
+   print(sys.COLORS.red ..  '==> using GPU #' .. cutorch.getDevice())
+
+   -- SpatialConvolutionMM does not support CUDA tensors
+   nn.SpatialConvolutionMM = nn.SpatialConvolution
+end
 
 ----------------------------------------------------------------------
 -- define model to train
@@ -69,11 +82,11 @@ if opt.network == '' then
       -- convolutional network
       ------------------------------------------------------------
       -- stage 1 : mean+std normalization -> filter bank -> squashing -> max pooling
-      model:add(nn.SpatialConvolutionMap(nn.tables.random(3,16,1), 5, 5))
+      model:add(nn.SpatialConvolutionMM(3, 16, 5, 5))
       model:add(nn.Tanh())
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 2 : filter bank -> squashing -> max pooling
-      model:add(nn.SpatialConvolutionMap(nn.tables.random(16, 256, 4), 5, 5))
+      model:add(nn.SpatialConvolutionMM(16, 256, 5, 5))
       model:add(nn.Tanh())
       model:add(nn.SpatialMaxPooling(2, 2, 2, 2))
       -- stage 3 : standard 2-layer neural network
@@ -124,6 +137,11 @@ print(model)
 --
 model:add(nn.LogSoftMax())
 criterion = nn.ClassNLLCriterion()
+
+if opt.type == 'cuda' then
+   model:cuda()
+   criterion = criterion:cuda()
+end
 
 ----------------------------------------------------------------------
 -- get/create dataset
@@ -265,6 +283,20 @@ function display(input)
    iter = iter + 1
 end
 
+-- allocate memory for minibatches
+local inputs = torch.Tensor(
+   opt.batchSize,
+   trainData.data:size(2), 
+   trainData.data:size(3),
+   trainData.data:size(4))
+local targets = torch.Tensor(opt.batchSize)
+
+-- minibatches into CudaTensors
+if opt.type == 'cuda' then
+   inputs = inputs:cuda()
+   targets = targets:cuda()
+end
+
 -- training function
 function train(dataset)
    -- epoch tracker
@@ -281,15 +313,16 @@ function train(dataset)
       -- disp progress
       xlua.progress(t, dataset:size())
 
+      -- shuffle at each epoch
+      local shuffle = torch.randperm(dataset:size())
+
       -- create mini batch
-      local inputs = {}
-      local targets = {}
-      for i = t,math.min(t+opt.batchSize-1,dataset:size()) do
+      local idx = 1
+      for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
          -- load new sample
-         local input = dataset.data[i]
-         local target = dataset.labels[i]
-         table.insert(inputs, input)
-         table.insert(targets, target)
+         inputs[idx] = dataset.data[shuffle[i]]
+         targets[idx] = dataset.labels[shuffle[i]]
+         idx = idx + 1
       end
 
       -- create closure to evaluate f(X) and df/dX
@@ -306,28 +339,29 @@ function train(dataset)
          local f = 0
 
          -- evaluate function for complete mini batch
-         for i = 1,#inputs do
-            -- estimate f
-            local output = model:forward(inputs[i])
-            local err = criterion:forward(output, targets[i])
-            f = f + err
+         -- for i = 1,opt.batchSize do
+         -- estimate f
+         local outputs = model:forward(inputs)
+         local err = criterion:forward(outputs, targets)
+         f = f + err
 
-            -- estimate df/dW
-            local df_do = criterion:backward(output, targets[i])
-            model:backward(inputs[i], df_do)
+         -- estimate df/dW
+         local df_do = criterion:backward(outputs, targets)
+         model:backward(inputs, df_do)
 
+         for i = 1,opt.batchSize do
             -- update confusion
-            confusion:add(output, targets[i])
+            confusion:add(outputs[i], targets[i])
 
-            -- visualize?
-            if opt.visualize then
-               display(inputs[i])
-            end
+            -- -- visualize?
+            -- if opt.visualize then
+            --    display(inputs[i])
+            -- end
          end
 
          -- normalize gradients and f(X)
-         gradParameters:div(#inputs)
-         f = f/#inputs
+         gradParameters:div(opt.batchSize)
+         f = f/opt.batchSize
          trainError = trainError + f
 
          -- return f and df/dX
@@ -406,20 +440,28 @@ function test(dataset)
 
    -- test over given dataset
    print('<trainer> on testing Set:')
-   for t = 1,dataset:size() do
+   for t = 1,dataset:size(),opt.batchSize do
       -- disp progress
       xlua.progress(t, dataset:size())
 
-      -- get new sample
-      local input = dataset.data[t]
-      local target = dataset.labels[t]
+      -- create mini batch
+      local idx = 1
+      for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
+         -- load new sample
+         inputs[idx] = dataset.data[i]
+         targets[idx] = dataset.labels[i]
+         idx = idx + 1
+      end
 
-      -- test sample
-      local pred = model:forward(input)
-      confusion:add(pred, target)
+      -- test samples
+      local preds = model:forward(inputs)
+      for i = 1,opt.batchSize do
+         -- update confusion
+         confusion:add(preds[i], targets[i])
+      end
 
       -- compute error
-      err = criterion:forward(pred, target)
+      err = criterion:forward(preds, targets)
       testError = testError + err
    end
 
