@@ -28,7 +28,7 @@ require 'paths'
 -- parse command-line options
 --
 local opt = lapp[[
-   -s,--save          (default "logs")      subdirectory to save logs
+   -s,--save                                subdirectory to save logs
    -n,--network       (default "")          reload pretrained network
    -m,--model         (default "convnet")   type of model tor train: convnet | mlp | linear
    -f,--full                                use the full dataset
@@ -172,8 +172,10 @@ testData:normalizeGlobal(mean, std)
 confusion = optim.ConfusionMatrix(classes)
 
 -- log results to files
-trainLogger = optim.Logger(paths.concat(opt.save, 'train.log'))
-testLogger = optim.Logger(paths.concat(opt.save, 'test.log'))
+if opt.save then
+    trainLogger = optim.Logger(paths.concat(opt.save, 'train.log'))
+    testLogger = optim.Logger(paths.concat(opt.save, 'test.log'))
+end
 
 -- training function
 function train(dataset)
@@ -296,19 +298,22 @@ function train(dataset)
    if opt.verbose then
       print(confusion)
    end
-   trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
-   confusion:zero()
+   if opt.save then
+      trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
 
-   -- save/log current net
-   local filename = paths.concat(opt.save, 'mnist.net')
-   os.execute('mkdir -p ' .. sys.dirname(filename))
-   if paths.filep(filename) then
-      os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
+      -- save/log current net
+      local filename = paths.concat(opt.save, 'mnist.net')
+      os.execute('mkdir -p ' .. sys.dirname(filename))
+      if paths.filep(filename) then
+         os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
+      end
+      if opt.verbose then
+         print('<trainer> saving network to '..filename)
+      end
    end
-   if opt.verbose then
-      print('<trainer> saving network to '..filename)
-   end
+
    -- torch.save(filename, model)
+   confusion:zero()
 
    -- next epoch
    epoch = epoch + 1
@@ -367,7 +372,9 @@ function test(dataset)
       confusion:updateValids()
    end
    accuracy = confusion.totalValid * 100
-   testLogger:add{['% mean class accuracy (test set)'] = accuracy}
+   if opt.save then
+      testLogger:add{['% mean class accuracy (test set)'] = accuracy}
+   end
    confusion:zero()
 
    return accuracy

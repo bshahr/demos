@@ -28,7 +28,7 @@ cmd:text()
 cmd:text('CIFAR Training')
 cmd:text()
 cmd:text('Options:')
-cmd:option('--save', fname:gsub('.lua',''), 'subdirectory to save/log experiments in')
+cmd:option('--save', '', 'subdirectory to save/log experiments in')
 cmd:option('--network', '', 'reload pretrained network')
 cmd:option('--model', 'convnet', 'type of model to train: convnet | mlp | linear')
 cmd:option('--full', false, 'use full dataset (50,000 samples)')
@@ -227,8 +227,10 @@ testData.data[{ {},3,{},{} }]:div(-std_v)
 confusion = optim.ConfusionMatrix(classes)
 
 -- log results to files
-accLogger = optim.Logger(paths.concat(opt.save, 'accuracy.log'))
-errLogger = optim.Logger(paths.concat(opt.save, 'error.log'   ))
+if opt.save ~= '' then
+   accLogger = optim.Logger(paths.concat(opt.save, 'accuracy.log'))
+   errLogger = optim.Logger(paths.concat(opt.save, 'error.log'   ))
+end
 
 -- display function
 function display(input)
@@ -371,16 +373,18 @@ function train(dataset)
    -- print confusion matrix
    print(confusion)
    local trainAccuracy = confusion.totalValid * 100
-   confusion:zero()
 
-   -- save/log current net
-   local filename = paths.concat(opt.save, 'cifar.net')
-   os.execute('mkdir -p ' .. paths.dirname(filename))
-   if paths.filep(filename) then
-      os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
+   if opt.save ~= '' then
+      -- save/log current net
+      local filename = paths.concat(opt.save, 'cifar.net')
+      os.execute('mkdir -p ' .. paths.dirname(filename))
+      if paths.filep(filename) then
+         os.execute('mv ' .. filename .. ' ' .. filename .. '.old')
+      end
+      print('<trainer> saving network to '..filename)
+      torch.save(filename, model)
    end
-   print('<trainer> saving network to '..filename)
-   torch.save(filename, model)
+   confusion:zero()
 
    -- next epoch
    epoch = epoch + 1
@@ -449,15 +453,17 @@ for i = 1, opt.epochs do
    trainAcc, trainErr = train(trainData)
    testAcc,  testErr  = test (testData)
 
-   -- update logger
-   accLogger:add{['% train accuracy'] = trainAcc, ['% test accuracy'] = testAcc}
-   errLogger:add{['% train error']    = trainErr, ['% test error']    = testErr}
+   if opt.save ~= '' then
+      -- update logger
+      accLogger:add{['% train accuracy'] = trainAcc, ['% test accuracy'] = testAcc}
+      errLogger:add{['% train error']    = trainErr, ['% test error']    = testErr}
 
-   -- plot logger
-   -- accLogger:style{['% train accuracy'] = '-', ['% test accuracy'] = '-'}
-   -- errLogger:style{['% train error']    = '-', ['% test error']    = '-'}
-   -- accLogger:plot()
-   -- errLogger:plot()
+      -- plot logger
+      accLogger:style{['% train accuracy'] = '-', ['% test accuracy'] = '-'}
+      errLogger:style{['% train error']    = '-', ['% test error']    = '-'}
+      accLogger:plot()
+      errLogger:plot()
+   end
 end
 
 print('<output> = ' .. testAcc)
