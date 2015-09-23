@@ -46,12 +46,15 @@ cmd:option('-seed', 1, 'fixed input seed for repeatable experiments')
 cmd:option('-plot', false, 'live plot')
 cmd:option('-optimization', 'SGD', 'optimization method: SGD | ASGD | CG | LBFGS')
 cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
-cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
+cmd:option('-batchSize', 100, 'mini-batch size (1 = pure stochastic)')
 cmd:option('-weightDecay', 0, 'weight decay (SGD only)')
 cmd:option('-momentum', 0, 'momentum (SGD only)')
 cmd:option('-t0', 1, 'start averaging at t0 (ASGD only), in nb of epochs')
 cmd:option('-maxIter', 2, 'maximum nb of iterations for CG and LBFGS')
 cmd:option('-threads', 2, 'nb of threads to use')
+cmd:option('--type', 'float', 'float or cuda')
+cmd:option('--devid', 1, 'device ID (if using CUDA)')
+cmd:option('--epochs', 10, 'number of epochs to train for')
 cmd:text()
 opt = cmd:parse(arg)
 
@@ -61,6 +64,15 @@ torch.manualSeed(opt.seed)
 -- threads
 torch.setnumthreads(opt.threads)
 print('<torch> set nb of threads to ' .. opt.threads)
+
+-- cuda
+if opt.type == 'cuda' then
+  print(sys.COLORS.red ..  '==> switching to CUDA')
+  require 'cunn'
+  cutorch.setDevice(opt.devid)
+  print(sys.COLORS.red ..  '==> using GPU #' .. cutorch.getDevice())
+  nn.SpatialConvolutionMM = nn.SpatialConvolution
+end
 
 ----------------------------------------------------------------------
 -- define model to train
@@ -83,16 +95,16 @@ if opt.network == '' then
    -- top container
    model = nn.Sequential()
    -- stage 1 : filter bank -> squashing -> max pooling
-   model:add(nn.SpatialConvolutionMap(nn.tables.random(3,16,1), 5, 5))
+   model:add(nn.SpatialConvolutionMM(3, 16, 5, 5))
    model:add(nn.Tanh())
    model:add(nn.SpatialLPPooling(16,2,2,2,2,2))
    -- stage 2 : filter bank -> squashing -> max pooling
-   model:add(nn.SpatialSubtractiveNormalization(16, image.gaussian1D(7)))
-   model:add(nn.SpatialConvolutionMap(nn.tables.random(16, 256, 4), 5, 5))
+   -- model:add(nn.SpatialSubtractiveNormalization(16, image.gaussian1D(7)))
+   model:add(nn.SpatialConvolutionMM(16, 256, 5, 5))
    model:add(nn.Tanh())
    model:add(nn.SpatialLPPooling(256,2,2,2,2,2))
    -- stage 3 : standard 2-layer neural network
-   model:add(nn.SpatialSubtractiveNormalization(256, image.gaussian1D(7)))
+   -- model:add(nn.SpatialSubtractiveNormalization(256, image.gaussian1D(7)))
    model:add(nn.Reshape(256*5*5))
    model:add(nn.Linear(256*5*5, 128))
    model:add(nn.Tanh())
@@ -115,6 +127,11 @@ print(model)
 -- loss function: negative log-likelihood
 --
 criterion = nn.ClassNLLCriterion()
+
+if opt.type == 'cuda' then
+  model = model:cuda()
+  criterion = criterion:cuda()
+end
 
 ----------------------------------------------------------------------
 -- get/create dataset
@@ -239,6 +256,20 @@ if opt.visualize then
    image.display{image=teset, legend='test set', nrow=10, padding=1}
 end
 
+-- allocate memory for minibatches
+local inputs = torch.Tensor(
+  opt.batchSize,
+  trainData.data:size(2),
+  trainData.data:size(3),
+  trainData.data:size(4))
+local targets = torch.Tensor(opt.batchSize)
+
+-- cast processed data into CudaTensors
+if opt.type == 'cuda' then
+  inputs = inputs:cuda()
+  targets = targets:cuda()
+end
+
 -- training function
 function train(dataset)
    -- epoch tracker
@@ -253,56 +284,49 @@ function train(dataset)
    -- do one epoch
    print('<trainer> on training set:')
    print("<trainer> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
-   for t = 1,dataset:size(),opt.batchSize do
+   for t = 1, dataset:size(), opt.batchSize do
       -- disp progress
       xlua.progress(t, dataset:size())
 
       -- create mini batch
-      local inputs = {}
-      local targets = {}
-      for i = t,math.min(t+opt.batchSize-1,dataset:size()) do
+      local idx = 1
+      for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
          -- load new sample
-         local input = dataset.data[shuffle[i]]:double()
-         local target = dataset.labels[shuffle[i]]
-         table.insert(inputs, input)
-         table.insert(targets, target)
+         inputs[idx] = dataset.data[shuffle[i]]
+         targets[idx] = dataset.labels[shuffle[i]]
+         idx = idx + 1
       end
 
       -- create closure to evaluate f(X) and df/dX
       local feval = function(x)
-                       -- get new parameters
-                       if x ~= parameters then
-                          parameters:copy(x)
-                       end
+         -- get new parameters
+         if x ~= parameters then
+            parameters:copy(x)
+         end
 
-                       -- reset gradients
-                       gradParameters:zero()
+         -- reset gradients
+         gradParameters:zero()
 
-                       -- f is the average of all criterions
-                       local f = 0
+         -- evaluate function for complete mini batch
+         local outputs = model:forward(inputs)
+         local f = criterion:forward(outputs, targets)
 
-                       -- evaluate function for complete mini batch
-                       for i = 1,#inputs do
-                          -- estimate f
-                          local output = model:forward(inputs[i])
-                          local err = criterion:forward(output, targets[i])
-                          f = f + err
+         -- estimate df/dW
+         local df_do = criterion:backward(outputs, targets)
+         model:backward(inputs, df_do)
 
-                          -- estimate df/dW
-                          local df_do = criterion:backward(output, targets[i])
-                          model:backward(inputs[i], df_do)
+         for i = 1, opt.batchSize do
+            -- update confusion
+            confusion:add(outputs[i], targets[i])
+         end
 
-                          -- update confusion
-                          confusion:add(output, targets[i])
-                       end
+         -- normalize gradients and f(X)
+         gradParameters:div(opt.batchSize)
+         f = f / opt.batchSize
 
-                       -- normalize gradients and f(X)
-                       gradParameters:div(#inputs)
-                       f = f/#inputs
-
-                       -- return f and df/dX
-                       return f,gradParameters
-                    end
+         -- return f and df/dX
+         return f, gradParameters
+      end
 
       -- optimize on current mini-batch
       if opt.optimization == 'CG' then
@@ -356,6 +380,7 @@ end
 function test(dataset)
    -- local vars
    local time = sys.clock()
+   local testError = 0
 
    -- averaged param use?
    if average then
@@ -365,17 +390,29 @@ function test(dataset)
 
    -- test over given dataset
    print('<trainer> on testing Set:')
-   for t = 1,dataset:size() do
+   for t = 1, dataset:size(), opt.batchSize do
       -- disp progress
       xlua.progress(t, dataset:size())
 
-      -- get new sample
-      local input = dataset.data[t]:double()
-      local target = dataset.labels[t]
+      -- create mini batch
+      local idx = 1
+      for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
+         -- load new sample
+         inputs[idx] = dataset.data[i]
+         targets[idx] = dataset.labels[i]
+         idx = idx + 1
+      end
 
-      -- test sample
-      local pred = model:forward(input)
-      confusion:add(pred, target)
+      -- test minibatch
+      local preds = model:forward(inputs)
+      for i = 1, opt.batchSize do
+         -- update confusion
+         confusion:add(preds[i], targets[i])
+      end
+
+      -- compute error
+      err = criterion:forward(preds, targets)
+      testError = testError + err
    end
 
    -- timing
@@ -383,9 +420,12 @@ function test(dataset)
    time = time / dataset:size()
    print("<trainer> time to test 1 sample = " .. (time*1000) .. 'ms')
 
+   testError = testError / dataset:size()
+
    -- print confusion matrix
    print(confusion)
-   testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   local testAccuracy = confusion.totalValid * 100
+   testLogger:add{['% mean class accuracy (test set)'] = testAccuracy}
    confusion:zero()
 
    -- averaged param use?
@@ -393,15 +433,17 @@ function test(dataset)
       -- restore parameters
       parameters:copy(cachedparams)
    end
+
+   return testAccuracy
 end
 
 ----------------------------------------------------------------------
 -- and train!
 --
-while true do
+for epoch = 1, opt.epochs do
    -- train/test
    train(trainData)
-   test(testData)
+   testAccuracy = test(testData)
 
    -- plot errors
    trainLogger:style{['% mean class accuracy (train set)'] = '-'}
@@ -411,3 +453,7 @@ while true do
       testLogger:plot()
    end
 end
+
+
+print('<output> = ' .. testAccuracy)
+

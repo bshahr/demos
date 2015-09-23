@@ -490,7 +490,7 @@ end
 ----------------------------------------------------------------------
 -- and train!
 --
-for i = 1, opt.epochs do
+for epoch = 1, opt.epochs do
    -- train/test
    trainAcc, trainErr = train(trainData)
    testAcc,  testErr  = test (testData)
