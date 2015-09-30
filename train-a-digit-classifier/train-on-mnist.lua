@@ -183,8 +183,8 @@ testData:normalizeGlobal(mean, std)
 -- allocate memory for minibatches
 local inputs = torch.Tensor(
   opt.batchSize,
-  1
-  geometry[1]
+  1,
+  geometry[1],
   geometry[2])
 local targets = torch.Tensor(opt.batchSize)
 
@@ -227,11 +227,10 @@ function train(dataset)
       -- create mini batch
       local idx = 1
       for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
-        -- load new sample
-         local sample = dataset[shuffle[i]]:clone()
-        inputs[idx] = sample[1]
-        targets[idx] = sample[2]:max(1)[2]:squeeze()
-        idx = idx + 1
+         -- load new sample
+         inputs[idx] = dataset.data[shuffle[i]]
+         targets[idx] = dataset.labels[shuffle[i]]
+         idx = idx + 1
       end
 
       -- create closure to evaluate f(X) and df/dX
@@ -366,9 +365,8 @@ function test(dataset)
       local idx = 1
       for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
         -- load new sample
-         local sample = dataset[i]:clone()
-        inputs[idx] = sample[1]
-        targets[idx] = sample[2]:max(1)[2]:squeeze()
+        inputs[idx] = dataset.data[i]
+        targets[idx] = dataset.labels[i]
         idx = idx + 1
       end
 
