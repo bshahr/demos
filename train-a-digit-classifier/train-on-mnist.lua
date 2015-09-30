@@ -41,6 +41,8 @@ local opt = lapp[[
    --coefL1           (default 0)           L1 penalty on the weights
    --coefL2           (default 0)           L2 penalty on the weights
    -t,--threads       (default 4)           number of threads
+   --type             (default float)       float or cuda
+   --devid            (default 1)           device ID (if using CUDA)
    -v,--verbose                             print out progress statements or not
    --epochs           (default 10)          number of epochs to train for
    --seed             (default 1)           random seed
@@ -53,6 +55,15 @@ torch.manualSeed(opt.seed)
 torch.setnumthreads(opt.threads)
 if opt.verbose then
     print('<torch> set nb of threads to ' .. torch.getnumthreads())
+end
+if opt.type == 'cuda' then
+   require 'cunn'
+   cutorch.setDevice(opt.devid)
+   nn.SpatialConvolutionMM = nn.SpatialConvolution
+   if opt.verbose then
+      print(sys.COLORS.red ..  '==> switching to CUDA')
+      print(sys.COLORS.red ..  '==> using GPU #' .. cutorch.getDevice())
+   end
 end
 
 -- use floats, for SGD
@@ -142,6 +153,11 @@ end
 model:add(nn.LogSoftMax())
 criterion = nn.ClassNLLCriterion()
 
+if opt.type == 'cuda' then
+  model = model:cuda()
+  criterion = criterion:cuda()
+end
+
 ----------------------------------------------------------------------
 -- get/create dataset
 --
@@ -163,6 +179,20 @@ trainData:normalizeGlobal(mean, std)
 -- create test set and normalize
 testData = mnist.loadTestSet(nbTestingPatches, geometry)
 testData:normalizeGlobal(mean, std)
+
+-- allocate memory for minibatches
+local inputs = torch.Tensor(
+  opt.batchSize,
+  1
+  geometry[1]
+  geometry[2])
+local targets = torch.Tensor(opt.batchSize)
+
+-- cast processed data into CudaTensors
+if opt.type == 'cuda' then
+  inputs = inputs:cuda()
+  targets = targets:cuda()
+end
 
 ----------------------------------------------------------------------
 -- define training and testing functions
@@ -191,19 +221,17 @@ function train(dataset)
       print("<trainer> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
    end
    for t = 1,dataset:size(),opt.batchSize do
+      -- shuffle at each epoch
+      local shuffle = torch.randperm(dataset:size())
+
       -- create mini batch
-      local inputs = torch.Tensor(opt.batchSize,1,geometry[1],geometry[2])
-      local targets = torch.Tensor(opt.batchSize)
-      local k = 1
-      for i = t,math.min(t+opt.batchSize-1,dataset:size()) do
-         -- load new sample
-         local sample = dataset[i]
-         local input = sample[1]:clone()
-         local _,target = sample[2]:clone():max(1)
-         target = target:squeeze()
-         inputs[k] = input
-         targets[k] = target
-         k = k + 1
+      local idx = 1
+      for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
+        -- load new sample
+         local sample = dataset[shuffle[i]]:clone()
+        inputs[idx] = sample[1]
+        targets[idx] = sample[2]:max(1)[2]:squeeze()
+        idx = idx + 1
       end
 
       -- create closure to evaluate f(X) and df/dX
@@ -335,18 +363,13 @@ function test(dataset)
       end
 
       -- create mini batch
-      local inputs = torch.Tensor(opt.batchSize,1,geometry[1],geometry[2])
-      local targets = torch.Tensor(opt.batchSize)
-      local k = 1
-      for i = t,math.min(t+opt.batchSize-1,dataset:size()) do
-         -- load new sample
-         local sample = dataset[i]
-         local input = sample[1]:clone()
-         local _,target = sample[2]:clone():max(1)
-         target = target:squeeze()
-         inputs[k] = input
-         targets[k] = target
-         k = k + 1
+      local idx = 1
+      for i = t, math.min(t + opt.batchSize-1, dataset:size()) do
+        -- load new sample
+         local sample = dataset[i]:clone()
+        inputs[idx] = sample[1]
+        targets[idx] = sample[2]:max(1)[2]:squeeze()
+        idx = idx + 1
       end
 
       -- test samples
