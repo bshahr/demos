@@ -125,9 +125,6 @@ else
    model:read(torch.DiskFile(opt.network))
 end
 
--- retrieve parameters and gradients
-parameters,gradParameters = model:getParameters()
-
 -- verbose
 print('<cifar> using model:')
 print(model)
@@ -142,6 +139,9 @@ if opt.type == 'cuda' then
    model:cuda()
    criterion = criterion:cuda()
 end
+
+-- retrieve parameters and gradients
+parameters,gradParameters = model:getParameters()
 
 ----------------------------------------------------------------------
 -- get/create dataset

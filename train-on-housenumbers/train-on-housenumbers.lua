@@ -116,9 +116,6 @@ else
    model = torch.load(opt.network)
 end
 
--- retrieve parameters and gradients
-parameters,gradParameters = model:getParameters()
-
 -- verbose
 print('<trainer> using model:')
 print(model)
@@ -132,6 +129,9 @@ if opt.type == 'cuda' then
   model = model:cuda()
   criterion = criterion:cuda()
 end
+
+-- retrieve parameters and gradients
+parameters,gradParameters = model:getParameters()
 
 ----------------------------------------------------------------------
 -- get/create dataset
