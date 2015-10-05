@@ -138,9 +138,6 @@ else
    model = torch.load(opt.network)
 end
 
--- retrieve parameters and gradients
-parameters,gradParameters = model:getParameters()
-
 -- verbose
 if opt.verbose then
    print('<mnist> using model:')
@@ -157,6 +154,9 @@ if opt.type == 'cuda' then
   model = model:cuda()
   criterion = criterion:cuda()
 end
+
+-- retrieve parameters and gradients
+parameters,gradParameters = model:getParameters()
 
 ----------------------------------------------------------------------
 -- get/create dataset
